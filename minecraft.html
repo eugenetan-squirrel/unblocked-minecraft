@@ -1,5 +1,53 @@
 <!DOCTYPE html>
 <html>
-  <head><script src="script.js"></script></head>
-  <body><button onclick="openUndetectable()">Undetectable Minecraft Website</button></body>
+<head>
+  <meta charset="UTF-8">
+  <title>Launcher</title>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <style>
+    body {
+      background:#000;
+      color:#fff;
+      font-family:sans-serif;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      align-items:center;
+      height:100vh;
+      margin:0;
+    }
+    input {
+      padding:10px;
+      font-size:16px;
+      width:240px;
+      margin-bottom:10px;
+      border-radius:6px;
+      border:none;
+    }
+    button {
+      padding:10px 20px;
+      font-size:16px;
+      border:none;
+      border-radius:6px;
+      cursor:pointer;
+      background:#4a148c;
+      color:#fff;
+    }
+    button:hover {
+      background:#7b1fa2;
+    }
+  </style>
+</head>
+
+<body>
+
+  <input id="code" placeholder="Enter code">
+  <button onclick="checkCode()">Submit</button>
+
+  <script src="script.js"></script>
+</body>
 </html>
