@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mini Brawl Stars – No Abilities Edition</title>
+
+<style>
+:root {
+  --bg:#0e0e0e;
+  --panel:#161616;
+  --accent:#ffd84d;
+  --green:#4caf50;
+  --red:#ff4a4a;
+  --blue:#4aa3ff;
+}
+
+body {
+  background:var(--bg);
+  color:white;
+  font-family: system-ui, sans-serif;
+  margin:0;
+  text-align:center;
+}
+
+/* ===== UI ===== */
+#ui {
+  width:620px;
+  margin:12px auto;
+  display:grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr;
+  gap:8px;
+  background:var(--panel);
+  border:2px solid #333;
+  padding:10px;
+  border-radius:8px;
+  font-size:14px;
+}
+
+.ui-box {
+  background:#1e1e1e;
+  padding:6px;
+  border-radius:6px;
+}
+
+.bar {
+  height:8px;
+  background:#333;
+  border-radius:4px;
+  overflow:hidden;
+  margin-top:4px;
+}
+
+.fill { height:100%; background:var(--green); }
+
+/* ===== GAME ===== */
+#game {
+  position:relative;
+  width:600px;
+  height:400px;
+  margin:10px auto;
+  background:#1f7a3a;
+  border:4px solid #333;
+  overflow:hidden;
+  outline:none;
+  border-radius:6px;
+}
+
+.player,.enemy {
+  position:absolute;
+  width:30px;
+  height:30px;
+  border-radius:50%;
+}
+
+.player { background:var(--blue); }
+.enemy { background:var(--red); }
+
+.bullet {
+  position:absolute;
+  background:yellow;
+  border-radius:50%;
+}
+.enemyBullet { background:orange; }
+
+/* ===== OVERLAYS ===== */
+.overlay {
+  position:absolute;
+  inset:0;
+  background:rgba(0,0,0,.85);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-direction:column;
+  z-index:10;
+}
+.hidden { display:none; }
+</style>
+</head>
+
+<body>
+
+<h2>Mini Brawl Stars</h2>
+<h5>WASD / Arrows • Space Shoot • P Pause • H Heal • T Speed Boost</h5>
+
+<div id="ui">
+  <div class="ui-box">❤️ HP<div class="bar"><div id="hpBar" class="fill"></div></div></div>
+  <div class="ui-box">🔫 Ammo<div class="bar"><div id="ammoBar" class="fill" style="background:#ffd84d"></div></div></div>
+  <div class="ui-box">❤️ Heal<br><span id="atkcd">READY</span></div>
+  <div class="ui-box">⚡ Speed<br><span id="defcd">READY</span></div>
+  <div class="ui-box">💀 Kills<br><span id="kills">0</span></div>
+</div>
+
+<div id="game" tabindex="0">
+  <div id="player" class="player"></div>
+
+  <div id="pauseOverlay" class="overlay hidden">
+    <h2>PAUSED</h2>
+    <p>Press P</p>
+  </div>
+</div>
+
+<script>
+const game = document.getElementById("game");
+const playerEl = document.getElementById("player");
+
+const hpBar = document.getElementById("hpBar");
+const ammoBar = document.getElementById("ammoBar");
+const killsText = document.getElementById("kills");
+const atkcd = document.getElementById("atkcd");
+const defcd = document.getElementById("defcd");
+const pauseOverlay = document.getElementById("pauseOverlay");
+
+let player = { x:280, y:180, hp:100, maxHp:100 };
+let baseSpeed = 3;
+let playerSpeed = baseSpeed;
+
+let ammo = 10;
+const MAX_AMMO = 10;
+let bulletSpeed = 6;
+let bulletSize = 6;
+
+let enemies = [];
+let bullets = [];
+let enemyBullets = [];
+
+let keys = {};
+let mouse = {x:0,y:0};
+
+let paused = false;
+let kills = 0;
+
+/* Cooldowns */
+const HEAL_CD = 30000;
+const SPEED_CD = 30000;
+let lastHeal = -Infinity;
+let lastSpeed = -Infinity;
+let speedBoostActive = false;
+
+/* Input */
+document.addEventListener("keydown", e => {
+  keys[e.key.toLowerCase()] = true;
+
+  if(e.key==="p"){
+    paused=!paused;
+    pauseOverlay.classList.toggle("hidden",!paused);
+    if(!paused) game.focus();
+  }
+
+  if(!paused){
+    // Heal
+    if(e.key.toLowerCase()==="h" && Date.now()-lastHeal>=HEAL_CD){
+      player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.2);
+      lastHeal = Date.now();
+    }
+
+    // Speed boost
+    if(e.key.toLowerCase()==="t" && Date.now()-lastSpeed>=SPEED_CD && !speedBoostActive){
+      speedBoostActive = true;
+      playerSpeed *= 1.2;
+      lastSpeed = Date.now();
+
+      setTimeout(()=>{
+        playerSpeed = baseSpeed;
+        speedBoostActive = false;
+      },10000);
+    }
+  }
+
+  if(e.code==="Space" && ammo>0 && !paused){
+    shoot();
+  }
+});
+document.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+game.addEventListener("mousemove",e=>{
+  const r=game.getBoundingClientRect();
+  mouse.x=e.clientX-r.left;
+  mouse.y=e.clientY-r.top;
+});
+
+/* Shooting */
+function shoot(){
+  const dx=mouse.x-(player.x+15);
+  const dy=mouse.y-(player.y+15);
+  const m=Math.hypot(dx,dy);
+  if(!m) return;
+
+  const b=document.createElement("div");
+  b.className="bullet";
+  b.style.width=b.style.height=bulletSize+"px";
+  game.appendChild(b);
+
+  bullets.push({
+    el:b,
+    x:player.x+15,
+    y:player.y+15,
+    vx:dx/m*bulletSpeed,
+    vy:dy/m*bulletSpeed
+  });
+  ammo--;
+}
+
+/* Ammo regen */
+setInterval(()=>{
+  if(!paused && ammo<MAX_AMMO) ammo++;
+},1000);
+
+/* Enemies */
+function spawnEnemy(){
+  const e=document.createElement("div");
+  e.className="enemy";
+  game.appendChild(e);
+  enemies.push({el:e,x:Math.random()*560,y:Math.random()*360,cd:60});
+}
+setInterval(()=>{ if(!paused) spawnEnemy(); },900);
+
+/* Game Loop */
+function loop(){
+  if(!paused){
+    if(keys.w||keys.arrowup) player.y-=playerSpeed;
+    if(keys.s||keys.arrowdown) player.y+=playerSpeed;
+    if(keys.a||keys.arrowleft) player.x-=playerSpeed;
+    if(keys.d||keys.arrowright) player.x+=playerSpeed;
+
+    player.x=Math.max(0,Math.min(570,player.x));
+    player.y=Math.max(0,Math.min(370,player.y));
+
+    enemies.forEach(e=>{
+      const dx=player.x-e.x, dy=player.y-e.y;
+      const d=Math.hypot(dx,dy);
+      if(d>40){ e.x+=dx/d*1.8; e.y+=dy/d*1.8; }
+
+      if(e.cd--<=0 && d<250){
+        const b=document.createElement("div");
+        b.className="bullet enemyBullet";
+        b.style.width=b.style.height="6px";
+        game.appendChild(b);
+        enemyBullets.push({el:b,x:e.x+15,y:e.y+15,vx:dx/d*4,vy:dy/d*4});
+        e.cd=80;
+      }
+
+      e.el.style.left=e.x+"px";
+      e.el.style.top=e.y+"px";
+    });
+
+    bullets.forEach((b,i)=>{
+      b.x+=b.vx; b.y+=b.vy;
+      b.el.style.left=b.x+"px";
+      b.el.style.top=b.y+"px";
+
+      enemies.forEach((e,ei)=>{
+        if(Math.hypot(b.x-e.x,b.y-e.y)<15){
+          e.el.remove();
+          enemies.splice(ei,1);
+          b.el.remove();
+          bullets.splice(i,1);
+          kills++;
+        }
+      });
+
+      if(b.x<0||b.y<0||b.x>600||b.y>400){
+        b.el.remove();
+        bullets.splice(i,1);
+      }
+    });
+
+    enemyBullets.forEach((b,i)=>{
+      b.x+=b.vx; b.y+=b.vy;
+      b.el.style.left=b.x+"px";
+      b.el.style.top=b.y+"px";
+      if(Math.hypot(b.x-player.x,b.y-player.y)<15){
+        player.hp-=2;
+        b.el.remove();
+        enemyBullets.splice(i,1);
+      }
+    });
+
+    if(player.hp<=0){
+      alert(`You died! Total kills: ${kills}`);
+      location.reload();
+    }
+  }
+
+  playerEl.style.left=player.x+"px";
+  playerEl.style.top=player.y+"px";
+
+  hpBar.style.width=(player.hp/player.maxHp*100)+"%";
+  ammoBar.style.width=(ammo/MAX_AMMO*100)+"%";
+  killsText.innerText=kills;
+
+  atkcd.innerText =
+    Math.max(0, Math.ceil((HEAL_CD - (Date.now() - lastHeal)) / 1000)) || "READY";
+  defcd.innerText =
+    Math.max(0, Math.ceil((SPEED_CD - (Date.now() - lastSpeed)) / 1000)) || "READY";
+
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+
+</body>
+</html>
