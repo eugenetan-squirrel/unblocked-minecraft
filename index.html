@@ -1,53 +1,246 @@
 <!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Launcher</title>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>Chat + Minecraft Launcher</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- Firebase -->
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
-  <style>
-    body {
-      background:#000;
-      color:#fff;
-      font-family:sans-serif;
-      display:flex;
-      flex-direction:column;
-      justify-content:center;
-      align-items:center;
-      height:100vh;
-      margin:0;
-    }
-    input {
-      padding:10px;
-      font-size:16px;
-      width:240px;
-      margin-bottom:10px;
-      border-radius:6px;
-      border:none;
-    }
-    button {
-      padding:10px 20px;
-      font-size:16px;
-      border:none;
-      border-radius:6px;
-      cursor:pointer;
-      background:#4a148c;
-      color:#fff;
-    }
-    button:hover {
-      background:#7b1fa2;
-    }
-  </style>
-</head>
+    <style>
+      body {background:#020617; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; font-family:system-ui,sans-serif;}
+      h3 {text-align:center; margin:6px 0 12px;}
+      
+      input {width:100%; background:#020617; color:white; border:1px solid #334155; border-radius:8px; padding:10px; margin-bottom:10px; box-sizing:border-box;}
+      input::placeholder {color:#64748b;}
 
-<body>
+      button {width:100%; background:linear-gradient(135deg,#38bdf8,#6366f1); color:black; border:none; padding:10px; border-radius:10px; font-weight:bold; cursor:pointer; margin-bottom:8px; transition:filter 0.2s;}
+      button:hover {filter:brightness(1.1); }
+      button.danger {background:linear-gradient(135deg,#fb7185,#ef4444);}
+      
+      .card {display:flex; flex-direction:column; height:100%;}
+      .input-row {display:flex; gap:6px; margin-bottom:10px;}
+      .error {color:#f87171; text-align:center; font-size:13px; }
+      .info {color:#22c55e; text-align:center; font-size:12px; margin-bottom:8px;}
+      
+      #chat-widget {width:320px; height:520px; background:#0f172a; color:#e5e7eb; border-radius:14px; padding:14px; box-shadow:0 10px 30px rgba(0,0,0,.5); display:flex; flex-direction:column;}
+      #messages {flex:1; background:#020617; border-radius:10px; padding:8px; overflow-y:auto; margin-bottom:10px; font-size:13px;}
+      
+    </style>
+  </head> 
+  <body>
 
-  <input id="code" placeholder="Enter code">
-  <button onclick="checkCode()">Submit</button>
+    <div id="chat-widget">
+      <div id="loginDiv" class="card">
+        <h3>🔐 Login</h3>
+        <input id="usernameInput" placeholder="Username">
+        <input id="passwordInput" maxlength="8" placeholder="Password">
+        <button id="loginBtn">Login</button>
+        <p id="loginError" class="error"></p>
+    </div>
 
-  <script src="script.js"></script>
-</body>
+    <div id="chatDiv" class="card" style="display:none;">
+      <h3>Group Chat</h3>
+      <div id="messages"></div>
+
+        <div class="input-row">
+          <input id="messageInput" placeholder="Type a message and press Enter">
+        </div>
+
+        <p id="loginInfo" class="info"></p>
+        <button id="mc">🎮 Launch Minecraft</button>
+        <button id="resetPwdBtn" class="danger">Reset Password</button>
+        <button id="resetChat" class="danger" style="display:none;">Clear Chat</button>
+        <button id="signOutBtn" class="danger">Sign Out</button>
+      </div>
+
+    </div>
+    <script>
+      firebase.initializeApp({
+        apiKey: "AIzaSyD9gD2PgytC59LjpsOc75y7LlZswGOWkQw",
+        authDomain: "chat-app-fa784.firebaseapp.com",
+        databaseURL: "https://chat-app-fa784-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "chat-app-fa784",
+        storageBucket: "chat-app-fa784.firebasestorage.app",
+        messagingSenderId: "307901353660",
+        appId: "1:307901353660:web:d225a52eb0c3de3488cab9"
+      });
+
+      const db = firebase.database();
+
+      let currentUser = localStorage.getItem("chatUser") || "";
+      let currentPassword = localStorage.getItem("chatPwd") || "";
+
+      const loginDiv = document.getElementById("loginDiv");
+      const chatDiv = document.getElementById("chatDiv");
+      const loginBtn = document.getElementById("loginBtn");
+      const passwordInput = document.getElementById("passwordInput");
+      const loginError = document.getElementById("loginError");
+      const loginInfo = document.getElementById("loginInfo");
+      const messagesDiv = document.getElementById("messages");
+      const input = document.getElementById("messageInput");
+      const mc = document.getElementById("mc");
+      const resetPwdBtn = document.getElementById("resetPwdBtn");
+      const signOutBtn = document.getElementById("signOutBtn");
+      const resetChatBtn = document.getElementById("resetChat");
+      const usernameInput = document.getElementById("usernameInput");
+
+      let lastMsgDay = null;
+      let canSend = true;
+
+      async function login(username, pwd) {
+        loginError.textContent = "";
+        if (!username || !pwd) return loginError.textContent = "Enter username and password";
+
+        try {
+          const snap = await db.ref("users/" + username).get();
+          if (!snap.exists()) {
+            loginError.textContent = "Username not found";
+            return;
+          }
+
+          if (snap.val().password !== pwd) {
+          loginError.textContent = "Incorrect password";
+          return;
+          }
+
+        currentUser = username;
+        currentPassword = pwd;
+        localStorage.setItem("chatUser", currentUser);
+        localStorage.setItem("chatPwd", currentPassword);
+
+        loginDiv.style.display = "none";
+        chatDiv.style.display = "flex";
+        loginInfo.textContent = `Logged in as ${currentUser}`;
+
+        resetChatBtn.style.display = currentUser === "Eugene" ? "block" : "none";
+      } catch (err) {
+        loginError.textContent = "Login failed. Try again.";
+        console.error(err);
+        }
+      }
+
+      loginBtn.onclick = () => login(usernameInput.value.trim(), passwordInput.value.trim());
+
+      input.addEventListener("keydown", e => {
+        if (e.key === "Enter") {
+          if (!currentUser) login(usernameInput.value.trim(), passwordInput.value.trim());
+          const msg = input.value.trim();
+          if(!msg) return;
+          if (!canSend) return loginInfo.textContent = "Chill man! Wait a sec.";
+          db.ref("chat").push({ user: currentUser, text: msg, timestamp: Date.now() });
+          input.value = "";
+          canSend = false;
+          setTimeout(() => { canSend = true; loginInfo.textContent = "";
+        }, 1000);
+        }
+      });
+
+      function formatDate(date) {
+        const options = { year: 'numeric', month: 'long' , day: 'numeric' };
+        return date.toLocaleDateString(undefined, options);
+      }
+
+      function formatTime(date) {
+        const h = date.getHours().toString().padStart(2, '0');
+        const m = date.getMinutes().toString().padStart(2, '0');
+        const s = date.getSeconds().toString().padStart(2, '0');
+        return `${h}.${m}.${s}`;
+      }
+
+      db.ref("chat").on("child_added", snap => {
+        const d = snap.val();
+        const msgDate = new Date(d.timestamp || Date.now());
+        const msgDay = formatDate(msgDate);
+
+        if (msgDay !== lastMsgDay) {
+          const dateDivider = document.createElement("p");
+          dateDivider.style.textAlign = "center";
+          dateDivider.style.color = "#94a3b8";
+          dateDivider.style.fontSize = "12px";
+          dateDivider.style.margin = "10px 0";
+          dateDivider.textContent = `--- ${msgDay} ---`;
+          messagesDiv.appendChild(dateDivider);
+          lastMsgDay = msgDay;
+        }
+        
+        const p = document.createElement("p");
+        p.innerHTML = `<b>${d.user} (${formatTime(msgDate)}):</b> ${d.text}`;
+        messagesDiv.appendChild(p);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        
+      });
+
+      resetPwdBtn.onclick = () => {
+        const oldCanSend = canSend;
+        canSend = false;
+
+        input.placeholder = "Input your new password...";
+        input.value = "";
+        input.focus();
+
+        const handlePwdEnter = async (e) => {
+          if (e.key !== "Enter") return;
+          const newPwd = input.value.trim();
+          if (!newPwd) return loginInfo.textContent = "Please enter a new password.";
+          if (newPwd.length < 8) return loginInfo.textContent = "Password must be at least 8 characters.";
+
+          await db.ref("users/" + currentUser + "/password").set(newPwd);
+          currentPassword = newPwd;
+          localStorage.setItem("chatPwd", newPwd);
+          passwordInput.value = newPwd;
+
+          input.value = "";
+          input.placeholder = "Type a message and press Enter";
+          loginInfo.textContent = `⚠️ New Password: ${newPwd}`;
+
+          canSend = oldCanSend;
+          input.removeEventListener("keydown", handlePwdEnter);
+
+          setTimeout(() => loginInfo.textContent = "", 5000);
+        };
+      input.addEventListener("keydown", handlePwdEnter);
+      };
+      
+      signOutBtn.onclick = () => {
+        localStorage.removeItem("chatUser");
+        localStorage.removeItem("chatPwd");
+
+        currentUser = "";
+        currentPassword = "";
+
+        chatDiv.style.display = "none";
+        loginDiv.style.display = "flex";
+
+        loginInfo.textContent = "";
+        messagesDiv.innerHTML = "";
+      };
+
+      resetChatBtn.onclick = () => {
+        db.ref("chat").remove();
+        messagesDiv.innerHTML = "";
+        lastMsgDay = null;
+      };
+
+      mc.onclick = async () => {
+        try {
+          const html = await fetch(
+          "https://cdn.jsdelivr.net/gh/PlanetDogeCodes/Eagletcraft-1.12@main/source%20file/egc1-12.xml"
+          ).then(r => r.text());
+
+          const w = window.open("", "_blank");
+          if (!w) return loginInfo.textContent = "Failed to launch Minecraft. Please try again.";
+          setTimeout(() => { loginInfo.textContent = ""; }, 5000);
+          w.document.open();
+          w.document.write(html);
+          w.document.close();
+
+        } catch {
+          loginInfo.textContent = "Failed to launch Minecraft. Please try again.";
+          setTimeout(() => { loginInfo.textContent = ""; }, 5000);
+        }
+      };
+    </script>
+  </body>
 </html>

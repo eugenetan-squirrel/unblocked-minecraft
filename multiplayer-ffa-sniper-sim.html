@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Firebase Sniper PvP</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<style>
+body { margin:0; overflow:hidden; font-family:'Press Start 2P', system-ui; background:#020617 }
+canvas { display:block; }
+
+#ui { position:absolute; top:10px; left:10px; color:white; text-shadow:0 0 4px black; font-family:'Press Start 2P' }
+#logout, #clearStats { margin-top:6px; padding:6px 10px; border:none; border-radius:8px; background:#fb7185; font-weight:bold; cursor:pointer; font-family:'Press Start 2P' }
+
+#login { position:absolute; inset:0; display:flex; justify-content:center; align-items:center; background:#020617; font-family:'Press Start 2P' }
+#login div { background:#0f172a; padding:20px; border-radius:14px; width:320px; }
+input,button { width:100%; margin:6px 0; padding:10px; border-radius:8px; border:none; font-family:'Press Start 2P' }
+
+#boardWrap { position:absolute; top:100px; left:10px; width:220px; pointer-events:none; font-family:'Press Start 2P' }
+#board { background:rgba(2,6,23,0.85); padding:10px; border-radius:10px; color:white; font-size:12px; line-height:1.4em; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div>
+    <h3 style="color:white">Login</h3>
+    <input id="user" placeholder="Username">
+    <input id="pass" type="password" placeholder="Password">
+    <button id="loginBtn">Login</button>
+    <p id="err" style="color:#f87171"></p>
+  </div>
+</div>
+
+<div id="ui" style="display:none">
+  <div id="coords"></div>
+  <div id="hp"></div>
+  <button id="logout">Sign Out</button>
+  <button id="clearStats" style="display:none">Clear Stats</button>
+</div>
+
+<div id="boardWrap"><div id="board"></div></div>
+<canvas id="game" width="1200" height="700"></canvas>
+
+<script>
+firebase.initializeApp({
+  apiKey:"AIzaSyD9gD2PgytC59LjpsOc75y7LlZswGOWkQw",
+  databaseURL:"https://chat-app-fa784-default-rtdb.asia-southeast1.firebasedatabase.app"
+});
+const db = firebase.database();
+
+const DAMAGE = 3000;
+const MAX_HP = 6750;
+const GREEN_SIZE = 1000;
+const BORDER_SIZE = 2000;
+const BULLET_RANGE = 450;
+
+let username="", ref=null, players={}, bullets=[], allPlayers={};
+let keys={};
+const me = { x:Math.random()*20-10, y:Math.random()*20-10, hp:MAX_HP, kills:0, deaths:0, lastShot:0 };
+
+loginBtn.onclick = async () => {
+  const u = user.value.trim();
+  const p = pass.value;
+  if(!u || !p){ err.textContent="Missing username or password"; return; }
+
+  const snap = await db.ref(`users/${u}/password`).get();
+  if(!snap.exists()){ err.textContent="User does not exist"; return; }
+  if(String(snap.val()) !== String(p)){ err.textContent="Wrong password"; return; }
+
+  username = u;
+  const statsSnap = await db.ref(`users/${u}`).get();
+  if(statsSnap.exists()){
+    me.kills = statsSnap.val().kills || 0;
+    me.deaths = statsSnap.val().deaths || 0;
+    me.hp = statsSnap.val().hp || MAX_HP;
+    me.x = statsSnap.val().x || me.x;
+    me.y = statsSnap.val().y || me.y;
+  }
+
+  const allSnap = await db.ref("users").get();
+  if(allSnap.exists()) allPlayers = allSnap.val();
+
+  login.style.display = "none";
+  ui.style.display = "block";
+
+  if(username.toLowerCase() === "admin") clearStats.style.display = "block";
+
+  startGame();
+};
+
+function startGame(){
+  ref = db.ref("players/"+username);
+  ref.set({x:me.x, y:me.y, hp:me.hp, kills:me.kills, deaths:me.deaths, lastShot:0, name:username});
+  ref.onDisconnect().remove();
+
+  db.ref("players").on("value", s=>players=s.val()||{});
+  ref.on("value", s=>{ if(s.exists()){ Object.assign(me,s.val()); allPlayers[username] = {...me}; } });
+
+  requestAnimationFrame(loop);
+}
+
+onkeydown = e => keys[e.key.toLowerCase()] = true;
+onkeyup = e => keys[e.key.toLowerCase()] = false;
+
+game.onclick = e => {
+  if(username.toLowerCase() === "admin") return; // Admin cannot attack
+  if(Date.now()-me.lastShot<1000) return;
+  me.lastShot = Date.now();
+  const r = game.getBoundingClientRect();
+  const dx = e.clientX - r.left - game.width/2;
+  const dy = e.clientY - r.top - game.height/2;
+  const d = Math.hypot(dx,dy);
+  bullets.push({x:me.x, y:me.y, vx:dx/d*16, vy:dy/d*16, distance:0});
+};
+
+function update(){
+  if(keys.w) me.y -=0.5;
+  if(keys.s) me.y +=0.5;
+  if(keys.a) me.x -=0.5;
+  if(keys.d) me.x +=0.5;
+
+  const half = GREEN_SIZE/2-15;
+  me.x = Math.max(-half, Math.min(half, me.x));
+  me.y = Math.max(-half, Math.min(half, me.y));
+
+  for(let i=bullets.length-1;i>=0;i--){
+    const b = bullets[i];
+    b.x += b.vx; b.y += b.vy;
+    b.distance += Math.hypot(b.vx,b.vy);
+    if(b.distance > BULLET_RANGE){ bullets.splice(i,1); continue; }
+
+    for(const k in players){
+      if(k === username || k.toLowerCase()==="admin") continue;
+      const p = players[k];
+      if(Math.hypot(b.x-p.x,b.y-p.y)<18){
+        db.ref("players/"+k).transaction(v=>{
+          if(!v) return v;
+          v.hp -= DAMAGE;
+          if(v.hp <= 0){
+            v.deaths = (v.deaths||0)+1;
+            v.hp = MAX_HP;
+            const offset = 50;
+            v.x = Math.min(Math.max(v.x+offset, -half), half);
+            v.y = Math.min(Math.max(v.y+offset, -half), half);
+            db.ref("users/"+k).update({deaths:v.deaths, hp:v.hp, x:v.x, y:v.y});
+            me.kills++;
+            db.ref("users/"+username).update({kills:me.kills});
+          } else {
+            db.ref("users/"+k).update({hp:v.hp});
+          }
+          allPlayers[k] = {...v};
+          return v;
+        });
+        bullets.splice(i,1);
+        break;
+      }
+    }
+  }
+
+  ref.update(me);
+  db.ref("users/"+username).update({x:me.x, y:me.y, hp:me.hp});
+  allPlayers[username] = {...me};
+}
+
+const ctx = game.getContext("2d");
+ctx.font = "12px 'Press Start 2P'";
+function draw(){
+  ctx.clearRect(0,0,game.width,game.height);
+  ctx.save();
+  ctx.translate(game.width/2-me.x, game.height/2-me.y);
+
+  ctx.strokeStyle="black"; ctx.lineWidth=8;
+  ctx.strokeRect(-BORDER_SIZE/2,-BORDER_SIZE/2,BORDER_SIZE,BORDER_SIZE);
+
+  ctx.fillStyle="#22c55e"; ctx.fillRect(-GREEN_SIZE/2,-GREEN_SIZE/2,GREEN_SIZE,GREEN_SIZE);
+
+  for(const k in players){
+    if(k.toLowerCase()==="admin") continue;
+    const p = players[k];
+    ctx.fillStyle="#888";
+    ctx.beginPath(); ctx.arc(p.x,p.y,15,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="white";
+    ctx.fillText(p.name, p.x-30, p.y-25);
+    ctx.fillText(`HP:${p.hp}`, p.x-30, p.y-10);
+  }
+
+  ctx.fillStyle="#fde047";
+  bullets.forEach(b=>{ ctx.beginPath(); ctx.arc(b.x,b.y,4,0,Math.PI*2); ctx.fill(); });
+
+  ctx.restore();
+}
+
+function uiUpdate(){
+  coords.textContent=`X:${me.x|0} Y:${me.y|0}`;
+  hp.textContent=`HP: ${me.hp}`;
+}
+
+function updateLeaderboard(){
+  const list = Object.values(allPlayers)
+    .filter(p => p.name.toLowerCase()!=="admin")
+    .sort((a,b)=>b.kills-a.kills || a.deaths-b.deaths);
+
+  board.innerHTML = "<b>Leaderboard</b><br><hr>" + list.map((p,i) =>
+    `${i+1}. ${p.name}<br>K:${p.kills||0} D:${p.deaths||0}<br>HP:${p.hp||0}`
+  ).join("<br><br>");
+}
+
+function loop(){ update(); draw(); uiUpdate(); updateLeaderboard(); requestAnimationFrame(loop); }
+
+logout.onclick = ()=>{
+  safeLogout();
+};
+function safeLogout(){
+  if(ref) ref.remove();
+  ref=null; username=""; bullets=[]; keys={};
+  login.style.display = "flex"; ui.style.display = "none";
+}
+
+window.addEventListener('beforeunload', ()=>{ if(ref) ref.remove(); });
+
+/* ADMIN CLEAR STATS */
+clearStats.onclick = async ()=>{
+  const usersSnap = await db.ref("users").get();
+  if(usersSnap.exists()){
+    for(const u in usersSnap.val()){
+      const randomX = Math.random()*20-10;
+      const randomY = Math.random()*20-10;
+      db.ref("users/"+u).update({
+        kills:0,
+        deaths:0,
+        hp:MAX_HP,
+        x:randomX,
+        y:randomY
+      });
+      if(players[u]) db.ref("players/"+u).update({kills:0,deaths:0,hp:MAX_HP,x:randomX,y:randomY});
+    }
+  }
+  // Also reset local player state
+  me.kills = 0;
+  me.deaths = 0;
+  me.hp = MAX_HP;
+  me.x = Math.random()*20-10;
+  me.y = Math.random()*20-10;
+  ref.update(me);
+};
+</script>
+</body>
+</html>
